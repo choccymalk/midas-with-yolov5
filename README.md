@@ -2,7 +2,7 @@ how to uhhh run it ig
 1. install python \
    1a. wget https://www.python.org/ftp/python/3.9.5/Python-3.9.5.tar.xz \
    1b. tar -xf Python-3.9.5.tar.xz \
-   1c. cd Python-3.9.5 \ 
+   1c. cd Python-3.9.5 \
    1d. ./configure \
    1e. make -j$(nproc) \
    1f. sudo make install 
