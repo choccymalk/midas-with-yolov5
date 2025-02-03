@@ -1,4 +1,4 @@
-how to uhhh run it ig 
+how to uhhh run it ig. not on windows dont run it on windows if youre using windows i think you can use wsl
 1. install python \
    1a. wget https://www.python.org/ftp/python/3.9.5/Python-3.9.5.tar.xz \
    1b. tar -xf Python-3.9.5.tar.xz \
