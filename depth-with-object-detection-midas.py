@@ -7,9 +7,48 @@ import torch.nn as nn
 from torchvision.transforms import Compose, Resize, ToTensor, Normalize
 from PIL import Image
 import glob
+from transformers import pipeline
 yolo_model = torch.hub.load(".", "custom", path="../yolov5s.pt", source="local", device="cpu")
 CLASSES_TO_DETECT = [0]
 CONFIDENCE_THRESHOLD = 0.7
+def calculate_object_angle(bbox, depth_map, camera_params):
+    """
+    Calculate the object's angle relative to the camera center.
+    
+    Parameters:
+    bbox (tuple): The object's bounding box coordinates (x1, y1, x2, y2)
+    depth_map (numpy.ndarray): The depth map for the image
+    camera_params (CameraParams): The camera calibration parameters
+    
+    Returns:
+    tuple: The object's angle in the X and Y dimensions (angle_x_deg, angle_y_deg)
+    """
+    x1, y1, x2, y2 = bbox
+    
+    # Calculate the object's center point
+    cx = (x1 + x2) / 2
+    cy = (y1 + y2) / 2
+    
+    # Get the image center coordinates
+    image_center_x = depth_map.shape[1] / 2
+    image_center_y = depth_map.shape[0] / 2
+    
+    # Calculate the object's offset from the image center
+    dx = cx - image_center_x
+    dy = cy - image_center_y
+    
+    # Get the object's distance from the camera
+    object_distance = depth_map[int(cy), int(cx)]
+    
+    # Calculate the angles in radians
+    angle_x = np.arctan2(dx, object_distance)
+    angle_y = np.arctan2(dy, object_distance)
+    
+    # Convert to degrees
+    angle_x_deg = np.rad2deg(angle_x)
+    angle_y_deg = np.rad2deg(angle_y)
+    
+    return angle_x_deg, angle_y_deg
 class CameraCalibrator:
     def __init__(self):
         self.criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
@@ -89,9 +128,15 @@ class CameraParams:
             self.dist_coeffs = None
             self.focal_length_px = None
 
+def load_depth_anything_model(image_path):
+    pipe = pipeline(task="depth-estimation", model="depth-anything/Depth-Anything-V2-Small-hf")
+    image = Image.open(image_path)
+    depth = pipe(image)["depth"]
+    print(depth)
+
 def load_midas_model():
-    model = torch.hub.load("intel-isl/MiDaS", "DPT_Large", pretrained=True)
-    device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+    model = torch.hub.load("intel-isl/MiDaS", "MiDaS_small", pretrained=True)
+    device = torch.device("cpu")#"cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
     model.eval()
     
@@ -136,7 +181,7 @@ def get_color_by_confidence(confidence):
     else:
         return (0, 0, 255)
 
-def draw_detection(image, box, class_name, confidence, depth_value=None):
+def draw_detection(image, box, class_name, confidence, depth_value=None, angle_x_deg=None, angle_y_deg=None):
     x1, y1, x2, y2 = map(int, box[:4])
     box_color = get_color_by_confidence(confidence)
     cv2.rectangle(image, (x1, y1), (x2, y2), box_color, 2)
@@ -146,6 +191,11 @@ def draw_detection(image, box, class_name, confidence, depth_value=None):
         label = f"{class_name} ({confidence:.2f}) | {depth_value:.2f}m"
     else:
         label = f"{class_name} ({confidence:.2f})"
+
+    if angle_x_deg is not None:
+        print("x degrees:" + str(round(angle_x_deg,1)))
+        print("y degrees:" + str(round(angle_y_deg,1)))
+        label = label + " | " + str(round(angle_x_deg,1)) + ", " + str(round(angle_x_deg,1))
 
     font = cv2.FONT_HERSHEY_SIMPLEX
     font_scale = 0.6
@@ -218,11 +268,15 @@ def process_image(image_path, calibration_file=None):
         
         depth_inference_time = time.time() - start_depth_time
 
+        angle_x_deg, angle_y_deg = calculate_object_angle((x1, y1, x2, y2), depth_np, camera_params)
+        print(str(angle_x_deg) + " " + str(angle_y_deg))
+        #draw_detection(yolo_input, [x1, y1, x2, y2], class_name, conf, depth_np[int((y1 + y2) / 2), int((x1 + x2) / 2)], angle_x_deg, angle_y_deg)
+
         for x1, y1, x2, y2, cls, conf in detected_boxes:
             box_depth = depth_np[y1:y2, x1:x2].mean()
             class_name = yolo_model.names[cls]
             box_with_depth = [x1, y1, x2, y2]
-            draw_detection(yolo_input, box_with_depth, class_name, conf, box_depth)
+            draw_detection(yolo_input, box_with_depth, class_name, conf, box_depth, angle_x_deg, angle_y_deg)
 
     # Save and display results
     input_dir = os.path.dirname(image_path)
@@ -242,12 +296,13 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description='Calibration utility')
     parser.add_argument('--calibrate', '-c', type=int, default=0, required=True, help='Calibrate image, 0 for no, 1 for yes (default is 0)')
+    parser.add_argument('--depth_anything', '-d', type=int, default=0, required=True, help='Run depth anything v2 model, 0 for no, 1 for yes (default is 0)')
     args = parser.parse_args()
-    if args.calibrate is 1:
+    if args.calibrate == 1 and args.depth_anything == 0:
         # First time setup: perform calibration
         calibrator = CameraCalibrator()
         calibrator.calibrate("./calibration-images")
-    else:
+    elif args.calibrate == 0 and args.depth_anything == 0:
         time.sleep(3)
         cap = cv2.VideoCapture(0)
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, 512)
@@ -256,3 +311,5 @@ if __name__ == "__main__":
         time.sleep(1.5)
         cv2.imwrite("temp.jpg",frame)
         process_image("temp.jpg", "./camera_calibration.npy")
+    elif args.calibrate == 0 and args.depth_anything == 1:
+        load_depth_anything_model("temp.jpg")
