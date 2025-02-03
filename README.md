@@ -16,8 +16,8 @@ how to uhhh run it ig
    4a. pip install -r requirements.txt 
 5. print this image i think it will work if you take a picture of your screen with it but you should probably just print it 
    ![print this](https://github.com/choccymalk/midas-with-yolov5/blob/main/chessboard.jpg?raw=true) 
-6. lay the chessboard flat and run take-pictures-for-calibration.py make sure you get enough with a lot of different angles like you need to take about 30 ish 
-7. calibrate your camera with depth-with-object-detection-midas.py 
+6. lay the chessboard flat and run take-pictures-for-calibration.py make sure you get enough with a lot of different angles like you need to take about 30 ish \
+7. calibrate your camera with depth-with-object-detection-midas.py \
    7a. python depth-with-object-detection-midas.py -c 1 
-8. now you can run it!!! 
+8. now you can run it!!! \
    8a. python depth-with-object-detection-midas.py -c 0 
