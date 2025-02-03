@@ -91,7 +91,7 @@ class CameraParams:
 
 def load_midas_model():
     model = torch.hub.load("intel-isl/MiDaS", "DPT_Large", pretrained=True)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
     model.to(device)
     model.eval()
     
