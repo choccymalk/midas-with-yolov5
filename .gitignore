@@ -1,3 +1,4 @@
 
 torch/hub/checkpoints/dpt_large_384.pt
 checkpoints/depth_pro.pt
+image.jpg
