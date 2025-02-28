@@ -8,6 +8,9 @@ from torchvision.transforms import Compose, Resize, ToTensor, Normalize
 from PIL import Image
 import glob
 from transformers import pipeline
+import tensorflow as tf
+import matplotlib
+
 yolo_model = torch.hub.load(".", "custom", path="../yolov5s.pt", source="local", device="cpu")
 CLASSES_TO_DETECT = [0]
 CONFIDENCE_THRESHOLD = 0.7
@@ -135,6 +138,7 @@ def load_depth_anything_model(image_path):
     print(depth)
 
 def load_midas_model():
+    '''
     model = torch.hub.load("intel-isl/MiDaS", "MiDaS_small", pretrained=True)
     device = torch.device("cpu")#"cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
@@ -147,6 +151,9 @@ def load_midas_model():
     ])
     
     return model, midas_transforms, device
+    '''
+    # load midas tflite file to google coral
+    
 
 def calculate_metric_depth(depth_map, camera_params, baseline_depth=1.0):  # Increased baseline
     """
@@ -245,6 +252,7 @@ def process_image(image_path, calibration_file=None):
             draw_detection(yolo_input, [x1, y1, x2, y2], class_name, conf)
 
     if detected_boxes:
+        '''
         midas_model, midas_transforms, device = load_midas_model()
         
         start_depth_time = time.time()
@@ -261,12 +269,35 @@ def process_image(image_path, calibration_file=None):
                 mode="bicubic",
                 align_corners=False,
             ).squeeze()
+        '''
         
-        depth_np = prediction.cpu().numpy()
+        interpreter = tf.lite.Interpreter(model_path="model-small_full_integer_quant_edgetpu.tflite")
+        interpreter.allocate_tensors()
+        #input_details = interpreter.get_input_details()
+        # Get input and output tensor details
+        input_details = interpreter.get_input_details()
+        print(input_details)
+        output_details = interpreter.get_output_details()
+        print(output_details)
+        # Load and preprocess the image
+        img = cv2.cvtColor(yolo_input, cv2.COLOR_BGR2RGB)
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        img = cv2.resize(img, (518, 518))  # Resize to the expected input size
+        img = img.astype(np.int8) / 255.0  # Normalize pixel values
+        input_data = np.expand_dims(img, axis=0)
+        input_data = (input_data * 255).astype(np.int8) 
+        interpreter.set_tensor(input_details[0]['index'], input_data)
+        start_time = time.time()
+        interpreter.invoke()
+        depth_map = interpreter.get_tensor(output_details[0]['index'])[0]
+        depth_map = (depth_map - depth_map.min()) / (depth_map.max() - depth_map.min()) * 255.0
+        depth_map = depth_map.astype(np.uint8)
+        
+        depth_np = depth_map.cpu().numpy()
         depth_np = apply_depth_refinement(depth_np)
         depth_np = calculate_metric_depth(depth_np, camera_params)
         
-        depth_inference_time = time.time() - start_depth_time
+        depth_inference_time = time.time() - start_time
 
         angle_x_deg, angle_y_deg = calculate_object_angle((x1, y1, x2, y2), depth_np, camera_params)
         print(str(angle_x_deg) + " " + str(angle_y_deg))
