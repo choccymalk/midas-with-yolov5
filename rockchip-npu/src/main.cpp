@@ -6,8 +6,8 @@
 #include <algorithm>
 #include <cmath>
 #include <opencv2/opencv.hpp>
+#include "httplib.h"
 #include "rknn_api.h"
-#include "crow.h"
 #include "json.hpp"
 
 using json = nlohmann::json;
@@ -15,6 +15,7 @@ using json = nlohmann::json;
 #define DEPTH_ANYTHING_MODEL_PATH "../models/depth-anything.rknn"
 #define YOLO_MODEL_PATH "../models/yolov5.rknn"
 #define DEFAULT_IMG_PATH "../test.jpg"
+#define DEFAULT_CAMERA_DEVICE 0
 
 // Structure to represent a detected object with depth information
 struct DetectedObject {
@@ -36,26 +37,52 @@ const std::vector<std::string> YOLO_CLASSES = {
     "coral", "algae", "reef", "person"
 };
 
-// Function to load an image and preprocess it for the model
-cv::Mat loadAndPreprocessImage(const std::string& image_path, int target_width, int target_height) {
-    cv::Mat orig_img = cv::imread(image_path, cv::IMREAD_COLOR);
-    if (orig_img.empty()) {
-        fprintf(stderr, "Open image failed: %s\n", image_path.c_str());
+cv::Mat takeSnapshotFromSelectedCamera(const int camera_id) {
+    cv::VideoCapture camera(camera_id);
+    if (!camera.isOpened()) {
+        std::cerr << "Could not open camera " << camera_id << std::endl;
         return cv::Mat();
     }
+    cv::Mat frame;
+    camera >> frame;
+    if (frame.empty()) {
+        std::cerr << "Could not grab frame from camera " << camera_id << std::endl;
+        return cv::Mat();
+    }
+    return frame; 
+    //return img;
+}
 
-    // Resize image to match model input dimensions
-    cv::Mat img;
-    cv::resize(orig_img, img, cv::Size(target_width, target_height));
+// Function to load an image and preprocess it for the model
+cv::Mat loadAndPreprocessImage(const std::string& image_path, const cv::Mat& frame, int target_width, int target_height) {
+    if(frame.empty() && !image_path.empty()){
+        cv::Mat orig_img = cv::imread(image_path, cv::IMREAD_COLOR);
+        if (orig_img.empty()) {
+            fprintf(stderr, "Open image failed: %s\n", image_path.c_str());
+            return cv::Mat();
+        }
+
+        // Resize image to match model input dimensions
+        cv::Mat img;
+        cv::resize(orig_img, img, cv::Size(target_width, target_height));
+        
+        // Convert to RGB (OpenCV loads as BGR)
+        cv::cvtColor(img, img, cv::COLOR_BGR2RGB);
     
-    // Convert to RGB (OpenCV loads as BGR)
-    cv::cvtColor(img, img, cv::COLOR_BGR2RGB);
+        return img;
+    } else {
+        cv::Mat img;
+        cv::resize(frame, img, cv::Size(target_width, target_height));
+        
+        // Convert to RGB (OpenCV loads as BGR)
+        cv::cvtColor(img, img, cv::COLOR_BGR2RGB);
     
-    return img;
+        return img;
+    }    
 }
 
 // Function to run YOLOv5
-std::vector<cv::Rect> runYolo(const std::string& image_path, std::vector<int>& class_ids, std::vector<float>& confidences) {
+std::vector<cv::Rect> runYolo(const std::string& image_path, std::vector<int>& class_ids, std::vector<float>& confidences, int camera_id) {
     int ret;
     rknn_context ctx;
     std::vector<cv::Rect> bboxes;
@@ -103,7 +130,7 @@ std::vector<cv::Rect> runYolo(const std::string& image_path, std::vector<int>& c
     // 3. Load and preprocess the image
     int input_width = input_attrs[0].dims[2];
     int input_height = input_attrs[0].dims[1];
-    cv::Mat img = loadAndPreprocessImage(image_path, input_width, input_height);
+    cv::Mat img = loadAndPreprocessImage(nullptr, takeSnapshotFromSelectedCamera(camera_id), input_width, input_height);
     if (img.empty()) {
         rknn_destroy(ctx);
         return bboxes;
@@ -208,7 +235,7 @@ std::vector<cv::Rect> runYolo(const std::string& image_path, std::vector<int>& c
 }
 
 // Function to run Depth Anything
-std::vector<std::vector<float>> runDepthAnything(const std::string& image_path) {
+std::vector<std::vector<float>> runDepthAnything(const std::string& image_path, int camera_id) {
     int ret;
     rknn_context ctx;
     std::vector<std::vector<float>> depth_map;
@@ -256,7 +283,7 @@ std::vector<std::vector<float>> runDepthAnything(const std::string& image_path) 
     // 3. Load and preprocess the image
     int input_width = input_attrs[0].dims[2];
     int input_height = input_attrs[0].dims[1];
-    cv::Mat img = loadAndPreprocessImage(image_path, input_width, input_height);
+    cv::Mat img = loadAndPreprocessImage(nullptr, takeSnapshotFromSelectedCamera(camera_id), input_width, input_height);
     if (img.empty()) {
         rknn_destroy(ctx);
         return depth_map;
@@ -363,16 +390,16 @@ float calculateDistance(float depth_value) {
 }
 
 // Process with both models and return combined results
-ModelResults processWithBothModels(const std::string& image_path) {
+ModelResults processWithBothModels(const std::string& image_path, int camera_id) {
     ModelResults results;
     
     // Run object detection
     std::vector<int> class_ids;
     std::vector<float> confidences;
-    std::vector<cv::Rect> bboxes = runYolo(image_path, class_ids, confidences);
+    std::vector<cv::Rect> bboxes = runYolo(image_path, class_ids, confidences, camera_id);
     
     // Run depth estimation
-    std::vector<std::vector<float>> depth_map = runDepthAnything(image_path);
+    std::vector<std::vector<float>> depth_map = runDepthAnything(image_path, camera_id);
     
     // If either model failed, return empty results
     if (bboxes.empty() || depth_map.empty()) {
@@ -435,11 +462,11 @@ std::string formatDistance(float meters) {
 }
 
 int main() {
-    crow::SimpleApp app;
+    //crow::SimpleApp app;
 
-    CROW_ROUTE(app, "/")([](){
+    /*CROW_ROUTE(app, "/")([](){
         return "Object Detection and Depth Estimation API";
-    });
+    //});
 
     CROW_ROUTE(app, "/get_all_objects")([](const crow::request& req){
         // Get image path from query parameter or use default
@@ -495,5 +522,63 @@ int main() {
     });
 
     app.port(8008).multithreaded().run();
+    */
+    httplib::Server svr;
+    
+    svr.Get("/", [](const httplib::Request &, httplib::Response &res) {
+        res.set_content("Object Detection and Depth Estimation API", "text/plain");
+    });
+    
+    svr.Get("/get_closest_object", [](const httplib::Request &req, httplib::Response &res) {
+        std::string cameraId = DEFAULT_CAMERA_DEVICE;
+        if (req.get_param_value("camera") != "" || nullptr) {
+            cameraId = req.get_param_value("camera");
+        } 
+        int cameraId_as_int = std::stoi(cameraId);
+        // Process image with both models
+        ModelResults results = processWithBothModels(nullptr, cameraId_as_int);
+        
+        // Convert to JSON (only closest object)
+        json response;
+        response["Objects"] = json::array();
+        
+        if (!results.objects.empty()) {
+            json object_data;
+            const auto& obj = results.objects[0]; // Get the closest object (already sorted)
+            object_data["objectClass"] = obj.objectClass;
+            object_data["objectDistance"] = formatDistance(obj.objectDistance);
+            object_data["objectLateralAngleRelativeToCenterOfFrame"] = std::to_string(int(obj.objectLateralAngle));
+            object_data["objectVerticalAngleRelativeToCenterOfFrame"] = std::to_string(int(obj.objectVerticalAngle));
+            response["Objects"].push_back(object_data);
+        }
+        res.set_content(response.dump(4), "application/json");
+    });
+
+    svr.Get("/get_all_objects", [](const httplib::Request &req, httplib::Response &res){
+        // Get image path from query parameter or use default
+        std::string cameraId = DEFAULT_CAMERA_DEVICE;
+        if (req.get_param_value("camera") != "" || nullptr) {
+            cameraId = req.get_param_value("camera");
+        } 
+        int cameraId_as_int = std::stoi(cameraId);
+        // Process image with both models
+        ModelResults results = processWithBothModels(nullptr, cameraId_as_int);
+        
+        // Convert to JSON
+        json response;
+        response["Objects"] = json::array();
+        
+        for (const auto& obj : results.objects) {
+            json object_data;
+            object_data["objectClass"] = obj.objectClass;
+            object_data["objectDistance"] = formatDistance(obj.objectDistance);
+            object_data["objectLateralAngleRelativeToCenterOfFrame"] = std::to_string(int(obj.objectLateralAngle));
+            object_data["objectVerticalAngleRelativeToCenterOfFrame"] = std::to_string(int(obj.objectVerticalAngle));
+            response["Objects"].push_back(object_data);
+        }
+    });
+
+    svr.listen("0.0.0.0", 8008);
+    
     return 0;
 }
