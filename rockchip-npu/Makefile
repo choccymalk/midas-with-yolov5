@@ -4,8 +4,12 @@
 CXX = g++
 
 # Compiler flags (adjust as needed)
-CXXFLAGS = -std=c++11 -Wall -Iinclude -I/opt/homebrew/opt/opencv/include/opencv4/opencv2
-
+ifeq $(shell uname -s),Darwin
+	CXXFLAGS = -std=c++11 -Ofast -Wall -Iinclude -I/opt/homebrew/opt/opencv/include/opencv4/opencv2
+endif
+ifeq ($(shell uname -s),Linux)
+	CXXFLAGS = -std=c++11 -Ofast -Wall -Iinclude -I/usr/include/opencv4
+endif
 # Linker flags (adjust OpenCV path if needed)
 LDFLAGS = `pkg-config --libs opencv4` # Using pkg-config for OpenCV libraries
 
