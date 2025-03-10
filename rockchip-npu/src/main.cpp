@@ -17,6 +17,8 @@ using json = nlohmann::json;
 #define DEFAULT_IMG_PATH "../test.jpg"
 #define DEFAULT_CAMERA_DEVICE 0
 
+cv::Mat captured_image;
+
 // Structure to represent a detected object with depth information
 struct DetectedObject {
     std::string objectClass;
@@ -54,8 +56,8 @@ cv::Mat takeSnapshotFromSelectedCamera(const int camera_id) {
 }
 
 // Function to load an image and preprocess it for the model
-cv::Mat loadAndPreprocessImage(const std::string& image_path, const cv::Mat& frame, int target_width, int target_height) {
-    if(frame.empty() && !image_path.empty()){
+cv::Mat loadAndPreprocessImage(const cv::Mat& frame, int target_width, int target_height) {
+    /*if(frame.empty() && !image_path.empty()){
         cv::Mat orig_img = cv::imread(image_path, cv::IMREAD_COLOR);
         if (orig_img.empty()) {
             fprintf(stderr, "Open image failed: %s\n", image_path.c_str());
@@ -68,21 +70,22 @@ cv::Mat loadAndPreprocessImage(const std::string& image_path, const cv::Mat& fra
         
         // Convert to RGB (OpenCV loads as BGR)
         cv::cvtColor(img, img, cv::COLOR_BGR2RGB);
-    
+        captured_image = img;
         return img;
-    } else {
+    } else {*/
         cv::Mat img;
         cv::resize(frame, img, cv::Size(target_width, target_height));
         
         // Convert to RGB (OpenCV loads as BGR)
         cv::cvtColor(img, img, cv::COLOR_BGR2RGB);
-    
+        
+        captured_image = img;
         return img;
-    }    
+    //}    
 }
 
 // Function to run YOLOv5
-std::vector<cv::Rect> runYolo(const std::string& image_path, std::vector<int>& class_ids, std::vector<float>& confidences, int camera_id) {
+std::vector<cv::Rect> runYolo(std::vector<int>& class_ids, std::vector<float>& confidences, int camera_id) {
     int ret;
     rknn_context ctx;
     std::vector<cv::Rect> bboxes;
@@ -130,7 +133,7 @@ std::vector<cv::Rect> runYolo(const std::string& image_path, std::vector<int>& c
     // 3. Load and preprocess the image
     int input_width = input_attrs[0].dims[2];
     int input_height = input_attrs[0].dims[1];
-    cv::Mat img = loadAndPreprocessImage(nullptr, takeSnapshotFromSelectedCamera(camera_id), input_width, input_height);
+    cv::Mat img = loadAndPreprocessImage(takeSnapshotFromSelectedCamera(camera_id), input_width, input_height);
     if (img.empty()) {
         rknn_destroy(ctx);
         return bboxes;
@@ -187,7 +190,7 @@ std::vector<cv::Rect> runYolo(const std::string& image_path, std::vector<int>& c
     float conf_threshold = 0.4;  // Adjust as needed
     
     // Original image dimensions (for scaling bounding boxes)
-    cv::Mat orig_img = cv::imread(image_path, cv::IMREAD_COLOR);
+    cv::Mat orig_img = captured_image;
     float scale_x = float(orig_img.cols) / input_width;
     float scale_y = float(orig_img.rows) / input_height;
     
@@ -235,7 +238,7 @@ std::vector<cv::Rect> runYolo(const std::string& image_path, std::vector<int>& c
 }
 
 // Function to run Depth Anything
-std::vector<std::vector<float>> runDepthAnything(const std::string& image_path, int camera_id) {
+std::vector<std::vector<float>> runDepthAnything(int camera_id) {
     int ret;
     rknn_context ctx;
     std::vector<std::vector<float>> depth_map;
@@ -283,7 +286,7 @@ std::vector<std::vector<float>> runDepthAnything(const std::string& image_path, 
     // 3. Load and preprocess the image
     int input_width = input_attrs[0].dims[2];
     int input_height = input_attrs[0].dims[1];
-    cv::Mat img = loadAndPreprocessImage(nullptr, takeSnapshotFromSelectedCamera(camera_id), input_width, input_height);
+    cv::Mat img = loadAndPreprocessImage(takeSnapshotFromSelectedCamera(camera_id), input_width, input_height);
     if (img.empty()) {
         rknn_destroy(ctx);
         return depth_map;
@@ -390,16 +393,16 @@ float calculateDistance(float depth_value) {
 }
 
 // Process with both models and return combined results
-ModelResults processWithBothModels(const std::string& image_path, int camera_id) {
+ModelResults processWithBothModels(int camera_id) {
     ModelResults results;
     
     // Run object detection
     std::vector<int> class_ids;
     std::vector<float> confidences;
-    std::vector<cv::Rect> bboxes = runYolo(image_path, class_ids, confidences, camera_id);
+    std::vector<cv::Rect> bboxes = runYolo(class_ids, confidences, camera_id);
     
     // Run depth estimation
-    std::vector<std::vector<float>> depth_map = runDepthAnything(image_path, camera_id);
+    std::vector<std::vector<float>> depth_map = runDepthAnything(camera_id);
     
     // If either model failed, return empty results
     if (bboxes.empty() || depth_map.empty()) {
@@ -407,7 +410,7 @@ ModelResults processWithBothModels(const std::string& image_path, int camera_id)
     }
     
     // Load original image for calculating angles
-    cv::Mat orig_img = cv::imread(image_path, cv::IMREAD_COLOR);
+    cv::Mat orig_img = captured_image;
     if (orig_img.empty()) {
         return results;
     }
@@ -530,13 +533,14 @@ int main() {
     });
     
     svr.Get("/get_closest_object", [](const httplib::Request &req, httplib::Response &res) {
-        std::string cameraId = DEFAULT_CAMERA_DEVICE;
-        if (req.get_param_value("camera") != "" || nullptr) {
-            cameraId = req.get_param_value("camera");
-        } 
-        int cameraId_as_int = std::stoi(cameraId);
+        std::string cameraId_as_string = std::to_string(DEFAULT_CAMERA_DEVICE);
+        if (req.has_param("camera")) {
+            cameraId_as_string = req.get_param_value("camera");
+        }
+
+        int cameraId_as_int = std::stoi(cameraId_as_string);
         // Process image with both models
-        ModelResults results = processWithBothModels(nullptr, cameraId_as_int);
+        ModelResults results = processWithBothModels(cameraId_as_int);
         
         // Convert to JSON (only closest object)
         json response;
@@ -556,13 +560,14 @@ int main() {
 
     svr.Get("/get_all_objects", [](const httplib::Request &req, httplib::Response &res){
         // Get image path from query parameter or use default
-        std::string cameraId = DEFAULT_CAMERA_DEVICE;
-        if (req.get_param_value("camera") != "" || nullptr) {
-            cameraId = req.get_param_value("camera");
-        } 
-        int cameraId_as_int = std::stoi(cameraId);
+        std::string cameraId_as_string = std::to_string(DEFAULT_CAMERA_DEVICE);
+        if (req.has_param("camera")) {
+            cameraId_as_string = req.get_param_value("camera");
+        }
+
+        int cameraId_as_int = std::stoi(cameraId_as_string);
         // Process image with both models
-        ModelResults results = processWithBothModels(nullptr, cameraId_as_int);
+        ModelResults results = processWithBothModels(cameraId_as_int);
         
         // Convert to JSON
         json response;

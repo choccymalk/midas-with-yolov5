@@ -4,11 +4,11 @@
 CXX = g++
 
 # Compiler flags (adjust as needed)
-ifeq $(shell uname -s),Darwin
-	CXXFLAGS = -std=c++11 -Ofast -Wall -Iinclude -I/opt/homebrew/opt/opencv/include/opencv4/opencv2
+ifeq ($(shell uname -s),Darwin)
+	CXXFLAGS = -std=c++23 -Ofast -Wall -Iinclude -I/opt/homebrew/opt/opencv/include/opencv4
 endif
 ifeq ($(shell uname -s),Linux)
-	CXXFLAGS = -std=c++11 -Ofast -Wall -Iinclude -I/usr/include/opencv4
+	CXXFLAGS = -std=c++23 -Ofast -Wall -Iinclude -I/usr/include/opencv4
 endif
 # Linker flags (adjust OpenCV path if needed)
 LDFLAGS = `pkg-config --libs opencv4` # Using pkg-config for OpenCV libraries
@@ -24,7 +24,7 @@ SOURCES += $(shell find include -name "*.h") # Find h files in the include direc
 
 # Object files
 OBJECTS = $(SOURCES:.cpp=.o)
-OBJECTS = $(OBJECTS:.c=.o) # handle .c files as well
+#OBJECTS = $(OBJECTS:.c=.o) # handle .c files as well
 
 # Executable name
 EXECUTABLE = rockchip_npu
@@ -41,11 +41,12 @@ all: $(EXECUTABLE)
 
 # Link object files to create the executable
 $(EXECUTABLE): $(OBJECTS)
-	$(CXX) $(LDFLAGS) $(OBJECTS) -o $(EXECUTABLE)
+	$(CXX) $(LDFLAGS) $(OBJECTS) -v
 
 # Clean object files and executable
 clean:
-	rm -f $(OBJECTS) $(EXECUTABLE)
+	rm -f ./rockchip_npu
+	rm -f ./src/main.o
 
 run:
 	./$(EXECUTABLE)
