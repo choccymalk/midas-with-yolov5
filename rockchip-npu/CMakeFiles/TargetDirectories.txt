@@ -1,0 +1,7 @@
+/Users/bentley/Documents/GitHub/midas-with-yolov5/rockchip-npu/CMakeFiles/rockchip_npu.dir
+/Users/bentley/Documents/GitHub/midas-with-yolov5/rockchip-npu/CMakeFiles/edit_cache.dir
+/Users/bentley/Documents/GitHub/midas-with-yolov5/rockchip-npu/CMakeFiles/rebuild_cache.dir
+/Users/bentley/Documents/GitHub/midas-with-yolov5/rockchip-npu/CMakeFiles/list_install_components.dir
+/Users/bentley/Documents/GitHub/midas-with-yolov5/rockchip-npu/CMakeFiles/install.dir
+/Users/bentley/Documents/GitHub/midas-with-yolov5/rockchip-npu/CMakeFiles/install/local.dir
+/Users/bentley/Documents/GitHub/midas-with-yolov5/rockchip-npu/CMakeFiles/install/strip.dir

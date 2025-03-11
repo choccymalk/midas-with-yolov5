@@ -9,6 +9,7 @@
 #include "httplib.h"
 #include "rknn_api.h"
 #include "json.hpp"
+#include <opencv2/videoio.hpp>
 
 using json = nlohmann::json;
 
